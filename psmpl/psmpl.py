@@ -1,69 +1,13 @@
 from bs4 import BeautifulSoup
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QWidget, 
-                             QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
-                             QLineEdit, QTextEdit)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QPushButton,
+                             QLineEdit, QTextEdit, QMessageBox)
 from PyQt5.QtGui import QIcon
-from PyQt5.QtGui import QFont
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt 
+
 import requests
 import re 
 import sys 
 
-# class MainWindow(QMainWindow):
-#     def __init__(self):
-#         super().__init__()
-#         self.setWindowTitle("My cool second GUI")
-#         self.setGeometry(250,100,1000,800)
-#         self.setWindowIcon(QIcon("virus_img.jpg"))
-
-#         self.button = QPushButton("ISO", self)
-#         self.line_edit = QLineEdit(self)
-
-#         label2 = QLabel(self)
-#         label2.setGeometry(0,0,100,100)
-
-#         pixmap = QPixmap("virus_img.jpg")
-#         label2.setPixmap(pixmap)
-
-#         label2.setScaledContents(True)
-
-#         label = QLabel("Hello", self)
-#         label.setFont(QFont("Times New Roman", 30))
-#         label.setGeometry(0, 0, 1000, 100)
-#         label.setStyleSheet("color: #292929;" 
-#                             "background-color: #6fdcf7;"
-#                             "font-weight: bold;"
-#                             "text-decoration: underline;")
-        
-#         label.setGeometry((self.width() - label.width()) // 2,
-#                           (self.height() - label.height()),
-#                           label.width(),
-#                           label.height())
-        
-#         # label.setAlignment(Qt.AlignTop) # Vertically top
-#         # label.setAlignment(Qt.AlignBottom) # Vertically bottom
-#         # label.setAlignment(Qt.AlignVCenter) # Vertically center
-#         # label.setAlignment(Qt.AlignRight) # Horizontally Right
-#         # label.setAlignment(Qt.AlignLeft) # Horizontally left
-
-#         label.setAlignment(Qt.AlignHCenter | Qt.AlignTop) # Blah blah
-
-#         self.initUI()
-
-#     def initUI(self):
-#         central_widget = QWidget()
-#         self.setCentralWidget(central_widget)
-    
-#         self.button.setGeometry(150, 200, 200, 200)
-#         self.button.setStyleSheet("font-size: 30px;")
-#         self.button.clicked.connect(self.on_click)
-
-#         self.line_edit.setGeometry(500, 500, 20, 40)
-
-#     def on_click(self):
-#         print("Button clicked!")
-#         self.button.setText("Clicked!")
+cache = {}
 
 class MainWindow(QMainWindow):
 
@@ -71,6 +15,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("PSMPL ISO Tool")
         self.setGeometry(400, 150, 750, 750)
+        self.setWindowIcon(QIcon("rampage.jpeg"))
 
         self.document = ""
         self.doc_label = QLabel(self)
@@ -87,8 +32,6 @@ class MainWindow(QMainWindow):
         self.initUI()
 
     def initUI(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
 
         self.doc_label.setGeometry(35, 75, 500, 50)
         self.doc_label.setText("Enter PUBLISHED document link: ")
@@ -109,48 +52,84 @@ class MainWindow(QMainWindow):
         self.output.setReadOnly(True)
         self.output.setGeometry(10, 350, 730, 350)
 
+        self.iso_button.clicked.connect(self.compileISO)
+
 
     def compileISO(self):
-        pass
+        self.output.clear()
+        self.document = self.doc_tbox.text()
+        self.player_string = self.player_tbox.text()
+        if not self.document:
+            QMessageBox.warning(self, "Error", "No document selected")
+            return
+        if not self.player_string:
+            QMessageBox.warning(self, "Error", "No player string entered")
+            return 
+        iso = ISO(self.document, self.player_string)
+        logs = iso.scrape()
 
+        for line in logs: 
+            self.output.append(line)
 
 class ISO:
 
-    def __init__(self, link):
+    def __init__(self, link, player_string):
         self.soup = None 
-        self.iso = []
+        self.link = link
+        self.player_string = player_string
+
+        self.html = self.getHTMLdocument(link)
+        if not self.html:
+            raise ValueError("Failed to retrieve html document")
+        if not self.extract():
+            raise ValueError("No names detected?")
+
+    def getHTMLdocument(self, url): 
+        
+        if url in cache: 
+            return cache[url]
+        response = requests.get(url) 
+        cache[url] = response.text
+        return cache[url]
+
+    def extract(self):
+        user_arr = self.player_string.split(",")
+        for i in range(len(user_arr)):
+            user_arr[i] = user_arr[i].strip()
+        return user_arr
 
 
-def getHTMLdocument(url): 
-      
-    response = requests.get(url) 
-    return response.text 
+    def scrape(self):
+        html = self.getHTMLdocument(self.link)
+        soup = BeautifulSoup(html, 'html.parser') 
+        all_msgs = soup.find_all(["p", "h3"])
+        users = self.extract()
 
-def extract():
-    users = input("Enter the users you would like to see, separated by commas: ")
-    user_arr = users.split(",")
-    print("You entered: ")
-    for i in range(len(user_arr)):
-        user_arr[i] = user_arr[i].strip()
-        print(user_arr[i], end=",")
-    return user_arr
+        output = []
 
+        user_string = '|'.join(user for user in users)
+        poster = re.compile(fr'^\[\d\d:\d\d:\d\d\] (?:[+%*@#^])?({user_string}):\s*(.+)', re.IGNORECASE)
+        voter = re.compile(fr'^\[\d\d:\d\d:\d\d\] \|c:\|\d{{9,11}}\|~\|({user_string})', re.IGNORECASE)
+        eliminated = re.compile(fr'({user_string}) was eliminated!', re.IGNORECASE)
+        role = re.compile(fr'({user_string})\'s role was .*', re.IGNORECASE)
 
-def scrape(url):
-    html = getHTMLdocument(url)
-    soup = BeautifulSoup(html, 'html.parser') 
-    all_msgs = soup.find_all("p")
-    users = extract()
+        daycheck = re.compile(r'^Day .*')
 
-    output = []
-    #x = re.findall(pattern, html, re.IGNORECASE)
-    for msg in all_msgs: 
-        text = msg.text
-        poster = re.compile(fr'^\[\d\d:\d\d:\d\d\] (?:[+%*@#])?({'|'.join(user for user in users)}):\s*(.+)', re.IGNORECASE)
-        if poster.match(text):
-            output.append(text.replace('\xa0', ' '))
+        for msg in all_msgs: 
+            text = msg.text
 
-    return output
+            if poster.match(text):
+                output.append(text.replace('\xa0', ' '))
+            elif voter.match(text):
+                output.append(re.sub(r'\|c:\|\d{9,11}\|~\|', '', text))
+            elif daycheck.match(text):
+                output.append("\n" + text + "\n")
+            elif role.match(text):
+                output.append(text)
+            elif eliminated.match(text):
+                output.append(text)
+
+        return output
 
 # link = 'https://docs.google.com/document/d/e/2PACX-1vTTqbQh7tu9Cnu_Bvc1Halgp54WXgteBq7rw_U-KvRRVYiyyodXXwp7dWEiO4RM9S89CmsxRzC_RcmH/pub'
 # endarray = scrape(link)
@@ -160,9 +139,35 @@ def scrape(url):
 # poster = r'\[\d{2}:\d{2}:\d{2}\] (?:[+%*@#])?(\w+):\s*(.+)'
 # match = re.search(poster, text)
 
-users = ['motogp', 'creamykitty']
-poster = re.compile(fr'^\[\dd:\dd:\dd\] (?:[+%*@#])?({'|'.join(user for user in users)}):\s*(.+)', re.IGNORECASE)
-print(poster)
+# users = ['motogp', 'creamykitty']
+# poster = re.compile(fr'^\[\dd:\dd:\dd\] (?:[^+%*@#])?({'|'.join(user for user in users)}):\s*(.+)', re.IGNORECASE)
+
+# msgs = ["[17:20:02] |c:|1744564802|~|CreamyKitty has voted articoo ☾.",
+#         '[17:22:15] |c:|1744564935|~|motogp has shifted their vote from articoo ☾ to Aziziller',
+#         '[17:20:28] Prodigu: roderickisamazing gl',
+#         '[17:20:31] |c:|1744564831|~|NightEmerald has shifted their vote from roderickisamazing to DkKoba',
+#         '[17:32:05] |c:|1744565525|~|CreamyKitty has voted motogp.', 
+#         '[17:35:42] |c:|1744565742|~|CreamyKitty has shifted their vote from motogp to SlowthePoke',
+#         '[17:38:49] |c:|1744565928|~|motogp has voted SlowthePoke.',
+#         '[18:12:11] |c:|1744567931|~|motogp has shifted their vote from commander¿awesome to strateg1c',
+#         '[18:28:43] |c:|1744568923|~|CreamyKitty has shifted their vote from Spiderz to roderickisamazing',
+#         '[18:30:15] |c:|1744569015|~|motogp has unvoted CreamyKitty.']
+
+
+# user_string = '|'.join(user for user in users)
+# #voted = re.compile(fr'^\[\d\d:\d\d:\d\d\] \|c:\|\d{{9,11}}\|~\|({user_string}) has (?:un)?voted (.+)', re.IGNORECASE)
+# print(user_string)
+# voted = re.compile(fr'^\[\d\d:\d\d:\d\d\] \|c:\|\d{{9,11}}\|~\|({user_string})', re.IGNORECASE)
+# for msg in msgs: 
+#     if voted.match(msg):
+#         print(re.sub(r'\|c:\|\d{9,11}\|~\|', '', msg))
+#         #print(re.sub('motogp', 'clown', msg))
+
+# shiftvoted = re.compile(fr'^\[\d\d:\d\d:\d\d\] \|c:\|\d{{9,11}}\|~\|({user_string}) has shifted their vote from (.+) to (.+)', re.IGNORECASE)
+# for msg in msgs: 
+#     if (b:= shiftvoted.match(msg)) != None:
+#         print(b.group(1), b.group(2), b.group(3))
+
 
 def main():
     app = QApplication(sys.argv)
